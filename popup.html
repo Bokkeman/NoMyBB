@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoMyBB settings</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="panel">
+    <header class="masthead">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2zm2 14h-4v-1.05a5.02 5.02 0 1 1 4 .02V16zm-4 2h4v1.15a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V18z"/></svg>
+      </span>
+      <div>
+        <h1>NoMyBB</h1>
+        <p>Cleaner headlines for the sites you list</p>
+      </div>
+    </header>
+
+    <form id="settings">
+      <div id="progress" class="progress" hidden>
+        <div id="progress-track" class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Headline cleaning progress">
+          <span id="progress-fill"></span>
+        </div>
+      </div>
+      <p id="run" class="run" hidden></p>
+
+      <label for="api-key">Deepseek API key</label>
+      <div class="key-row">
+        <input id="api-key" name="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+        <button type="button" id="toggle-key">Show</button>
+      </div>
+      <p class="hint">Saved in this browser's local storage. Sent only to api.deepseek.com.</p>
+
+      <label for="topics">Topics to ignore</label>
+      <textarea id="topics" name="topicsToIgnore" rows="6" placeholder="One topic per line&#10;Eskom&#10;Black Friday"></textarea>
+      <p class="hint">Articles mainly about these topics are hidden on listing pages.</p>
+
+      <label class="check" for="skip-partner">
+        <input id="skip-partner" name="skipPartnerStories" type="checkbox">
+        <span>Skip partner and sponsored stories on BusinessTech and Newsday</span>
+      </label>
+      <p class="hint">Partner content and Industry News on those two sites keep the headline the site published, and they are not sent to Deepseek.</p>
+
+      <section class="advanced">
+        <h2>Advanced</h2>
+        <p class="hint">NoMyBB rewrites the sites in this list. MyBroadband, Newsday, and BusinessTech start filled in. Choose a domain to edit its rules, or choose ...Add new.</p>
+        <p class="hint">A domain is stored as a hostname. Pasting https://www.example.com/news becomes example.com. Added sites run over https, and www is included.</p>
+        <p class="hint">Selectors can use tags, classes, ids, and attributes, joined by a space or &gt;. A comma uses the earliest match on the page.</p>
+
+        <label for="site-select">Site</label>
+        <select id="site-select"></select>
+
+        <div id="new-domain-row" hidden>
+          <label for="new-domain">Domain name</label>
+          <input id="new-domain" type="text" autocomplete="off" spellcheck="false" placeholder="example.com">
+          <button type="button" id="analyse-site" hidden>Analyse</button>
+          <p id="analyse-status" class="hint"></p>
+          <p class="hint">Hostname only. https://, www, and any path are removed. Analyse reads the site home page and asks Deepseek to fill in the rules below.</p>
+        </div>
+
+        <label for="index-path">Index path</label>
+        <input id="index-path" type="text" autocomplete="off" spellcheck="false" placeholder="/news">
+        <p class="hint">Listing pages are this path and every page under it. Article pages use the fields below. Use / for the whole site. /news also covers category pages and /news/page/2.</p>
+
+        <label for="index-title">Index titles</label>
+        <input id="index-title" type="text" autocomplete="off" spellcheck="false" placeholder="a[rel=&quot;bookmark&quot;]">
+        <p class="hint">Selector for the headline links on a listing page. Each link path has to match the article pattern.</p>
+
+        <label for="article-pattern">Article pattern</label>
+        <input id="article-pattern" type="text" autocomplete="off" spellcheck="false" placeholder="^/section/\d+/[^/]+$">
+        <p class="hint">Regular expression matched against the article path, without a trailing slash.</p>
+
+        <label for="article-title">Article title</label>
+        <input id="article-title" type="text" autocomplete="off" spellcheck="false" placeholder="h1.entry-title">
+        <p class="hint">Selector for the headline on the article page. The lightbulb shows the original title.</p>
+
+        <label for="body-selector">Article body</label>
+        <input id="body-selector" type="text" autocomplete="off" spellcheck="false" placeholder=".entry-content">
+        <p class="hint">Selector for the element whose paragraphs are sent to Deepseek with the headline.</p>
+
+        <label for="summary-selector">Summary</label>
+        <input id="summary-selector" type="text" autocomplete="off" spellcheck="false" placeholder=".entry-content">
+        <p class="hint">Selector for where the summary is inserted. A container receives it as its first content. A paragraph or heading receives it immediately before that element.</p>
+
+        <div class="actions site-actions">
+          <button type="button" id="reset-site" hidden>Reset built-in rules</button>
+          <button type="button" id="remove-site">Remove this site</button>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="submit" class="primary">Save</button>
+        <button type="button" id="clear-cache">Clear cache</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+      <p id="counts" class="counts"></p>
+    </form>
+  </main>
+  <script src="shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

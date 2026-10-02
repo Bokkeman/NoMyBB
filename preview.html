@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NoMyBB preview</title>
+  <link rel="stylesheet" href="content.css">
+  <style>
+    body { margin: 0; font: 16px/1.4 Georgia, serif; background: #fff; color: #161616; }
+    .wide, .narrow { padding: 16px; }
+    .narrow { max-width: 390px; border-top: 8px solid #f3f0e8; }
+    h2 { font: 600 13px/1.2 "Segoe UI", sans-serif; letter-spacing: 0.04em; text-transform: uppercase; }
+    article { display: flex; gap: 12px; margin: 0 0 16px; }
+    .thumb { width: 42%; background: #ddd; min-height: 72px; }
+    h3 { margin: 0; font: 600 18px/1.3 "Segoe UI", sans-serif; }
+    h3 a { color: #161616; text-decoration: none; }
+    .meta { margin: 0 0 4px; color: #666; font: 12px/1.2 "Segoe UI", sans-serif; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <div class="wide">
+    <h2>Desktop</h2>
+    <div class="col-12 col-lg-4">
+      <article>
+        <div class="thumb"></div>
+        <div>
+          <p class="meta">Cellular</p>
+          <h3 class="entry-title"><a rel="bookmark" href="https://mybroadband.co.za/news/cellular/668944-south-africas-richest-province-spent-r21-3-million-on-data-and-cellphones-for-government-employees.html">South Africa’s richest province spent R21.3 million on data and cellphones for government employees</a></h3>
+        </div>
+      </article>
+    </div>
+    <div class="col-12 post-list">
+      <article>
+        <div class="thumb"></div>
+        <div>
+          <p class="meta">Government</p>
+          <h3 class="entry-title"><a rel="bookmark" href="https://mybroadband.co.za/news/government/669076-good-news-for-south-africans-who-want-to-get-a-smart-id-from-their-bank.html">Good news for South Africans who want to get a smart ID from their bank</a></h3>
+        </div>
+      </article>
+    </div>
+    <div class="col-12 post-list">
+      <article>
+        <div class="thumb"></div>
+        <div>
+          <p class="meta">Energy</p>
+          <h3 class="entry-title"><a rel="bookmark" href="https://mybroadband.co.za/news/energy/669203-3-more-years-for-eskom-chairman.html">Mteto Nyati sticking around as Eskom chairman</a></h3>
+        </div>
+      </article>
+    </div>
+  </div>
+  <div class="narrow">
+    <h2>Narrow</h2>
+    <div class="col-12">
+      <article>
+        <div>
+          <p class="meta">Government</p>
+          <h3 class="entry-title"><a rel="bookmark" href="https://mybroadband.co.za/news/government/669076-good-news-for-south-africans-who-want-to-get-a-smart-id-from-their-bank.html">Good news for South Africans who want to get a smart ID from their bank</a></h3>
+        </div>
+      </article>
+    </div>
+  </div>
+  <script src="shared.js"></script>
+  <script>
+    const results = {
+      'https://mybroadband.co.za/news/cellular/668944-south-africas-richest-province-spent-r21-3-million-on-data-and-cellphones-for-government-employees.html': {
+        replacementTitle: 'Gauteng spent R21.3 million on data and cellphones for government employees',
+        ignore: false
+      },
+      'https://mybroadband.co.za/news/government/669076-good-news-for-south-africans-who-want-to-get-a-smart-id-from-their-bank.html': {
+        replacementTitle: 'South Africans can get a smart ID from their bank',
+        ignore: false
+      },
+      'https://mybroadband.co.za/news/energy/669203-3-more-years-for-eskom-chairman.html': {
+        replacementTitle: 'Mteto Nyati gets 3 more years as Eskom chairman',
+        ignore: true
+      }
+    };
+    const parsed = NoMyBB.parseArticles(document);
+    for (const article of parsed.articles) {
+      const result = results[article.url];
+      if (!result) continue;
+      for (const anchor of parsed.nodesByUrl.get(article.url)) {
+        NoMyBB.applyTitle(anchor, { ...result, originalTitle: article.title });
+      }
+    }
+  </script>
+</body>
+</html>
