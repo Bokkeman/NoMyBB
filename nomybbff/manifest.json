@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "NoMyBB",
+  "version": "1.0.8",
+  "description": "Cleans headlines on MyBroadband, Newsday, and BusinessTech: drops clickbait, names the vague places and people, and hides topics you ignore.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "nomybbff@bokkeman.github.io",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["websiteContent", "authenticationInfo"]
+      }
+    }
+  },
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://mybroadband.co.za/*",
+    "https://www.mybroadband.co.za/*",
+    "https://newsday.co.za/*",
+    "https://www.newsday.co.za/*",
+    "https://businesstech.co.za/*",
+    "https://www.businesstech.co.za/*",
+    "https://api.deepseek.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "scripts": ["shared.js", "background.js"]
+  },
+  "action": {
+    "default_title": "NoMyBB settings",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "popup.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mybroadband.co.za/*",
+        "https://www.mybroadband.co.za/*",
+        "https://newsday.co.za/*",
+        "https://www.newsday.co.za/*",
+        "https://businesstech.co.za/*",
+        "https://www.businesstech.co.za/*"
+      ],
+      "js": ["shared.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

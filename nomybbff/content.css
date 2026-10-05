@@ -1,0 +1,65 @@
+.nomybb-summary {
+  margin: 0 0 1.25rem;
+  color: #1c1915;
+}
+
+.nomybb-summary-label {
+  margin: 0 0 0.35rem;
+  color: #8a6a12;
+  font: 600 11px/1 "Segoe UI", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nomybb-summary p {
+  margin: 0;
+  font: 17px/1.5 Georgia, "Iowan Old Style", serif;
+}
+
+.nomybb-ignored {
+  display: none !important;
+}
+
+#nomybb-status {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 2147483646 !important;
+  display: block !important;
+  margin: 0;
+  padding: 8px 12px 10px;
+  background: #fff8e8;
+  border-bottom: 1px solid #e6d3a1;
+  color: #3d3422;
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+
+.nomybb-progress {
+  position: relative;
+  overflow: hidden;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 99px;
+  background: #ead9b0;
+}
+
+.nomybb-progress > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #1c1915;
+}
+
+.nomybb-progress.busy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(240, 180, 41, 0.95), transparent);
+  transform: translateX(-100%);
+  animation: nomybb-slide 1.2s linear infinite;
+}
+
+@keyframes nomybb-slide {
+  to { transform: translateX(100%); }
+}
