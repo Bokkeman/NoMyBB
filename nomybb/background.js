@@ -110,15 +110,15 @@ async function fetchArticleText(url, bodySelector) {
   return NoMyBB.extractArticleText(await response.text(), bodySelector);
 }
 
-async function callDeepseek(apiKey, topics, articles) {
-  // The chat API does not browse. The extension fetches each article and sends that text in the JSON payload.
+async function postChat(apiKey, request) {
+  // The chat API does not browse. Callers send the article text in the JSON payload.
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify(NoMyBB.buildChatRequest(topics, articles)),
+    body: JSON.stringify(request),
     signal: AbortSignal.timeout(60000)
   });
   const bodyText = await response.text();
@@ -133,8 +133,87 @@ async function callDeepseek(apiKey, topics, articles) {
     throw new Error('Deepseek returned an unreadable response.');
   }
   const content = payload?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Deepseek returned no title.');
+  if (!content) throw new Error('Deepseek returned an empty response.');
+  return content;
+}
+
+async function postFollowUp(apiKey, request) {
+  // Chat completions cannot search. Follow-ups use the Anthropic messages endpoint, which runs web search.
+  const response = await fetch('https://api.deepseek.com/anthropic/v1/messages', {
+    method: 'POST',
+    redirect: 'error',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'x-api-key': apiKey,
+      Authorization: `Bearer ${apiKey}`,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify(request),
+    signal: AbortSignal.timeout(90000)
+  });
+  const bodyText = await response.text();
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Deepseek rejected the API key.');
+  }
+  if (!response.ok) {
+    let detail = '';
+    try {
+      const parsed = JSON.parse(bodyText);
+      detail = String(parsed?.error?.message || parsed?.message || '').slice(0, 240);
+    } catch {
+      detail = '';
+    }
+    throw new Error(detail ? `Deepseek request failed (${response.status}): ${detail}` : `Deepseek request failed (${response.status}).`);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    throw new Error('Deepseek returned an unreadable response.');
+  }
+  return NoMyBB.readFollowUpMessage(payload);
+}
+
+async function callDeepseek(apiKey, topics, articles) {
+  const content = await postChat(apiKey, NoMyBB.buildChatRequest(topics, articles));
   return NoMyBB.parseModelResult(content, articles, topics);
+}
+
+async function answerFollowUp(message) {
+  const question = NoMyBB.normalizeTitle(message?.question || '').slice(0, 500);
+  if (!question) return { ok: false, error: 'Type a question first.' };
+  const settings = await readSettings();
+  if (!settings.apiKey) {
+    return { ok: false, error: 'Open the NoMyBB toolbar icon and save a Deepseek API key.' };
+  }
+  let articleText = String(message?.articleText || '').slice(0, 8600);
+  const thin = articleText.length < 80 || !articleText.includes('Article:');
+  if (thin && message?.url) {
+    try {
+      const fetched = await fetchArticleText(message.url, message.bodySelector || '');
+      if (fetched && (fetched.length > articleText.length || !articleText.includes('Article:'))) {
+        articleText = fetched;
+      }
+    } catch {
+      // The open page's text is the fallback when the article cannot be fetched again.
+    }
+  }
+  if (!articleText) {
+    return { ok: false, error: 'NoMyBB could not read this article, so there is nothing to ask about.' };
+  }
+  try {
+    const researched = await postFollowUp(settings.apiKey, NoMyBB.buildFollowUpRequest({
+      title: message?.title || '',
+      summary: message?.summary || '',
+      articleText,
+      history: message?.history,
+      question
+    }));
+    return { ok: true, answer: researched.answer, sources: researched.sources };
+  } catch (error) {
+    return { ok: false, error: error?.message || 'Deepseek request failed.' };
+  }
 }
 
 async function rewriteBatch(apiKey, topics, batch) {
@@ -356,6 +435,66 @@ function syncSites() {
   return run;
 }
 
+const VERSION_CHECK_MS = 24 * 60 * 60 * 1000;
+let versionCheck = null;
+
+function versionNotice(stored) {
+  const current = NoMyBB.parseVersionToken(chrome.runtime.getManifest().version);
+  const latest = NoMyBB.parseVersionToken(stored?.latestVersion);
+  const dismissed = NoMyBB.parseVersionToken(stored?.dismissedVersion);
+  return {
+    ok: true,
+    update: Boolean(latest) && NoMyBB.compareVersions(latest, current) > 0 && latest !== dismissed,
+    current,
+    latest
+  };
+}
+
+function readVersionNotice() {
+  if (versionCheck) return versionCheck;
+  versionCheck = loadVersionNotice().finally(() => {
+    versionCheck = null;
+  });
+  return versionCheck;
+}
+
+async function loadVersionNotice() {
+  const stored = await chrome.storage.local.get(['versionCheckedAt', 'latestVersion', 'dismissedVersion']);
+  const checkedAt = Number(stored.versionCheckedAt) || 0;
+  if (checkedAt && Date.now() - checkedAt < VERSION_CHECK_MS) return versionNotice(stored);
+  let latest = NoMyBB.parseVersionToken(stored.latestVersion);
+  try {
+    const response = await fetch(NoMyBB.VERSION_FILE_URL, {
+      method: 'GET',
+      redirect: 'error',
+      cache: 'no-store',
+      credentials: 'omit',
+      headers: { Accept: 'text/plain' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (response.ok) {
+      const parsed = NoMyBB.parseVersionToken(String(await response.text()).slice(0, 80));
+      if (parsed) latest = parsed;
+    }
+  } catch {
+    // Keep the previous version and wait a day before asking GitHub again.
+  }
+  const next = {
+    versionCheckedAt: Date.now(),
+    latestVersion: latest,
+    dismissedVersion: NoMyBB.parseVersionToken(stored.dismissedVersion)
+  };
+  await chrome.storage.local.set(next);
+  return versionNotice(next);
+}
+
+async function dismissVersion(latest) {
+  const token = NoMyBB.parseVersionToken(latest);
+  if (!token) return { ok: false };
+  await chrome.storage.local.set({ dismissedVersion: token });
+  return { ok: true };
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'nomybb') return;
   port.onMessage.addListener((message) => {
@@ -376,19 +515,40 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== 'SYNC_SITES') return;
-  syncSites()
-    .then(() => sendResponse({ ok: true }))
-    .catch((error) => sendResponse({ ok: false, error: error?.message || 'Could not register the site.' }));
-  return true;
+  if (message?.type === 'SYNC_SITES') {
+    syncSites()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || 'Could not register the site.' }));
+    return true;
+  }
+  if (message?.type === 'FOLLOW_UP') {
+    answerFollowUp(message)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, error: error?.message || 'Deepseek request failed.' }));
+    return true;
+  }
+  if (message?.type === 'VERSION_STATUS') {
+    readVersionNotice()
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false, update: false }));
+    return true;
+  }
+  if (message?.type === 'DISMISS_VERSION') {
+    dismissVersion(message.latest)
+      .then((result) => sendResponse(result))
+      .catch(() => sendResponse({ ok: false }));
+    return true;
+  }
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   syncSites().catch(() => {});
+  readVersionNotice().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
   syncSites().catch(() => {});
+  readVersionNotice().catch(() => {});
 });
 
 syncSites().catch(() => {});

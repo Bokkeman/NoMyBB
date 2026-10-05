@@ -17,3 +17,5 @@ A temporary add-on is removed when Firefox exits. Load it again after a restart.
 To keep it permanently, zip this folder with `manifest.json` at the root of the zip and submit the zip on [addons.mozilla.org](https://addons.mozilla.org/).
 
 Open settings from the toolbar button. The Deepseek API key stays in Firefox extension storage and is sent only to api.deepseek.com, along with the headline and article text being cleaned.
+
+On an article page, the summary is followed by a box where you can ask Deepseek a follow-up. The article text is the starting point. Deepseek then searches the web for what the question needs beyond that page. The question, the answer, and the pages it used appear above the box.

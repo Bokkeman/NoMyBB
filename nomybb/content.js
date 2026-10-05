@@ -31,6 +31,15 @@
     banner.style.setProperty('z-index', '2147483646', 'important');
     banner.style.setProperty('display', 'block', 'important');
     document.documentElement.appendChild(banner);
+    NoMyBB.placeStatusBelowUpdate(document);
+  }
+
+  function checkVersion() {
+    chrome.runtime.sendMessage({ type: 'VERSION_STATUS' }).then((notice) => {
+      NoMyBB.showUpdateNotice(document, notice, (latest) => {
+        chrome.runtime.sendMessage({ type: 'DISMISS_VERSION', latest }).catch(() => {});
+      });
+    }).catch(() => {});
   }
 
   function showStatus(message, progress) {
@@ -226,6 +235,69 @@
     });
   }
 
+  function showAskError(form, message) {
+    const error = form.querySelector('.nomybb-ask-error');
+    if (!error) return;
+    error.textContent = message || '';
+    error.hidden = !message;
+  }
+
+  async function askFollowUp(form) {
+    const box = form.closest('#nomybb-summary');
+    const input = form.querySelector('input');
+    const button = form.querySelector('button');
+    if (!input || !button || !box || !rule) return;
+    const question = NoMyBB.normalizeTitle(input.value);
+    if (!question) {
+      showAskError(form, 'Type a question first.');
+      return;
+    }
+    const story = currentArticle();
+    if (!story || story.selectorError) {
+      showAskError(form, 'NoMyBB could not find this article.');
+      return;
+    }
+    input.disabled = true;
+    button.disabled = true;
+    button.textContent = 'Searching...';
+    showAskError(form, '');
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'FOLLOW_UP',
+        url: story.url,
+        title: NoMyBB.normalizeTitle(story.heading.textContent),
+        summary: box.querySelector('.nomybb-summary-text')?.textContent || '',
+        articleText: NoMyBB.articleBodyText(document, rule.bodySelector),
+        bodySelector: rule.bodySelector || '',
+        history: NoMyBB.collectFollowUpHistory(box),
+        question
+      });
+      if (!box.isConnected) return;
+      if (!response?.ok || !response.answer) {
+        showAskError(form, response?.error || 'Deepseek did not answer.');
+        return;
+      }
+      NoMyBB.appendFollowUp(box, question, response.answer, response.sources);
+      input.value = '';
+    } catch {
+      if (box.isConnected) showAskError(form, 'NoMyBB could not reach Deepseek. Reload the page and try again.');
+    } finally {
+      if (!box.isConnected) return;
+      input.disabled = false;
+      button.disabled = false;
+      button.textContent = 'Ask';
+      input.focus();
+    }
+  }
+
+  document.addEventListener('submit', (event) => {
+    const form = event.target;
+    if (!form?.classList?.contains('nomybb-ask')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    askFollowUp(form);
+  }, true);
+
   function watch() {
     if (watching) return;
     watching = true;
@@ -240,8 +312,10 @@
     skipPartner = Boolean(stored.skipPartnerStories);
     rule = NoMyBB.ruleForHost(NoMyBB.resolveSiteRules(stored.siteRules), location.hostname);
     applyStoredRun(stored.runState);
+    checkVersion();
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local') return;
+      if (changes.latestVersion || changes.dismissedVersion) checkVersion();
       if (changes.runState) applyStoredRun(changes.runState.newValue);
       if (changes.siteRules) {
         rule = NoMyBB.ruleForHost(NoMyBB.resolveSiteRules(changes.siteRules.newValue), location.hostname);

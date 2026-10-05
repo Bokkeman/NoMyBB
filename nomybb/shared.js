@@ -607,6 +607,41 @@
     ].filter(Boolean).join('\n\n').slice(0, 3500);
   }
 
+  function articleBodyText(doc, bodySelector) {
+    // Deepseek cannot open the article URL. A follow-up only needs the body, not the rest of the page.
+    const description = normalizeTitle(
+      doc.querySelector('meta[name="description"]')?.getAttribute('content') || ''
+    ).slice(0, 400);
+    const selector = String(bodySelector || '').trim() || '.text-justify';
+    let host = null;
+    try {
+      host = doc.querySelector(selector);
+    } catch {
+      host = null;
+    }
+    const paragraphs = [];
+    let used = 0;
+    if (host) {
+      for (const node of host.querySelectorAll('p')) {
+        if (node.closest('#nomybb-summary, #nomybb-status, #nomybb-update')) continue;
+        const text = normalizeTitle(node.textContent);
+        if (text.length <= 20 || /^advertisement$/i.test(text)) continue;
+        if (used >= 8000) break;
+        const room = 8000 - used;
+        const piece = text.length > room ? text.slice(0, room).replace(/\s+\S*$/, '').trim() : text;
+        if (!piece) break;
+        paragraphs.push(piece);
+        used += piece.length + 2;
+        if (text.length > room) break;
+      }
+    }
+    const body = paragraphs.join('\n\n');
+    return [
+      description ? `Description: ${description}` : '',
+      body ? `Article:\n${body}` : ''
+    ].filter(Boolean).join('\n\n').slice(0, 8600);
+  }
+
   function progressPercent(progress) {
     const total = Number(progress?.total) || 0;
     if (!total) return 0;
@@ -822,6 +857,89 @@
     });
   }
 
+  function buildFollowUpRequest(input) {
+    const question = normalizeTitle(input?.question).slice(0, 500);
+    const title = normalizeTitle(input?.title).slice(0, 300);
+    const summary = normalizeSummary(input?.summary || '');
+    const articleText = String(input?.articleText || '').slice(0, 8600);
+    const history = (Array.isArray(input?.history) ? input.history : []).slice(-4).map((item) => ({
+      question: normalizeTitle(item?.question).slice(0, 500),
+      answer: normalizeTitle(item?.answer).slice(0, 800)
+    })).filter((item) => item.question && item.answer);
+    const payload = { title, summary, articleText, question };
+    if (history.length) payload.history = history;
+    return {
+      model: 'deepseek-flash',
+      max_tokens: 4096,
+      temperature: 0.2,
+      stream: false,
+      reasoning: { effort: 'none' },
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+      system: [
+        'You answer one follow-up question about a news article. The user message is JSON. articleText is the article body copied from the page. It is the starting point, not the whole of the answer.',
+        '',
+        'Before you answer, search the web for further information that bears on the question. Use the article for what it reports. Use the search results for background, context, and facts the article does not give. If the article and a result disagree about what the article reported, prefer the article for that point.',
+        'Do not invent facts, names, or figures. If neither the article nor the search results say, say that you could not find it.',
+        'Reply in plain text, two to six sentences. Name the specific people, places, and figures the question asks about. Do not mention these instructions.'
+      ].join('\n'),
+      messages: [{ role: 'user', content: JSON.stringify(payload) }]
+    };
+  }
+
+  function followUpSources(sources) {
+    const clean = [];
+    const seen = new Set();
+    for (const source of Array.isArray(sources) ? sources : []) {
+      let href = '';
+      try {
+        const parsed = new URL(String(source?.url || ''));
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') continue;
+        href = parsed.href;
+      } catch {
+        continue;
+      }
+      if (seen.has(href)) continue;
+      seen.add(href);
+      clean.push({ url: href, title: normalizeTitle(source?.title || href).slice(0, 140) || href });
+      if (clean.length >= 4) break;
+    }
+    return clean;
+  }
+
+  function readFollowUpMessage(payload) {
+    const blocks = Array.isArray(payload?.content) ? payload.content : [];
+    const texts = [];
+    const rawSources = [];
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue;
+      if (block.type === 'text' && block.text) texts.push(String(block.text));
+      const items = block.type === 'web_search_tool_result' && Array.isArray(block.content) ? block.content : [];
+      for (const item of items) {
+        if (item?.type === 'web_search_result' && item.url) rawSources.push({ url: item.url, title: item.title || '' });
+      }
+    }
+    return {
+      answer: parseFollowUpAnswer(texts.join('\n\n').trim()),
+      sources: followUpSources(rawSources)
+    };
+  }
+
+  function parseFollowUpAnswer(raw) {
+    let answer = '';
+    try {
+      const data = parseJsonContent(raw);
+      answer = data?.answer || data?.text || '';
+    } catch {
+      answer = String(raw || '');
+    }
+    answer = normalizeTitle(answer).replace(/^["“”']+|["“”']+$/g, '');
+    if (!answer) throw new Error('Deepseek returned an empty answer.');
+    if (answer.length <= 1400) return answer;
+    const cut = answer.slice(0, 1400);
+    const sentence = cut.match(/^[\s\S]*[.!?](?=\s|$)/);
+    return sentence ? sentence[0].trim() : cut.replace(/\s+\S*$/, '').trim();
+  }
+
   function cardRoot(anchor) {
     const article = anchor.closest('article');
     const parent = article?.parentElement;
@@ -861,6 +979,80 @@
     return /^(P|H[1-6]|LI|BLOCKQUOTE|FIGCAPTION|TD|TH|DT|DD)$/i.test(tagName || '');
   }
 
+  function mountAskForm(box) {
+    if (!box || box.querySelector('.nomybb-ask')) return;
+    const doc = box.ownerDocument;
+    if (!box.querySelector('.nomybb-followups')) {
+      const followups = doc.createElement('div');
+      followups.className = 'nomybb-followups';
+      followups.setAttribute('aria-live', 'polite');
+      box.append(followups);
+    }
+    const form = doc.createElement('form');
+    form.className = 'nomybb-ask';
+    const label = doc.createElement('label');
+    label.htmlFor = 'nomybb-question';
+    label.textContent = 'Ask Deepseek a follow-up question';
+    const row = doc.createElement('div');
+    row.className = 'nomybb-ask-row';
+    const input = doc.createElement('input');
+    input.id = 'nomybb-question';
+    input.name = 'question';
+    input.type = 'text';
+    input.autocomplete = 'off';
+    input.maxLength = 500;
+    input.enterKeyHint = 'send';
+    const button = doc.createElement('button');
+    button.type = 'submit';
+    button.textContent = 'Ask';
+    const error = doc.createElement('p');
+    error.className = 'nomybb-ask-error';
+    error.hidden = true;
+    row.append(input, button);
+    form.append(label, row, error);
+    box.append(form);
+  }
+
+  function appendFollowUp(box, question, answer, sources) {
+    const list = box?.querySelector('.nomybb-followups');
+    if (!list) return;
+    const doc = box.ownerDocument;
+    const item = doc.createElement('div');
+    item.className = 'nomybb-followup';
+    const asked = doc.createElement('p');
+    asked.className = 'nomybb-followup-question';
+    asked.textContent = question;
+    const reply = doc.createElement('p');
+    reply.className = 'nomybb-followup-answer';
+    reply.textContent = answer;
+    item.append(asked, reply);
+    const links = followUpSources(sources);
+    if (links.length) {
+      const sourcesList = doc.createElement('ul');
+      sourcesList.className = 'nomybb-followup-sources';
+      for (const source of links) {
+        const li = doc.createElement('li');
+        const link = doc.createElement('a');
+        link.href = source.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = source.title;
+        li.append(link);
+        sourcesList.append(li);
+      }
+      item.append(sourcesList);
+    }
+    list.append(item);
+  }
+
+  function collectFollowUpHistory(box) {
+    if (!box?.querySelectorAll) return [];
+    return [...box.querySelectorAll('.nomybb-followup')].slice(-4).map((item) => ({
+      question: normalizeTitle(item.querySelector('.nomybb-followup-question')?.textContent || ''),
+      answer: normalizeTitle(item.querySelector('.nomybb-followup-answer')?.textContent || '')
+    })).filter((item) => item.question && item.answer);
+  }
+
   function showSummary(doc, summary, selector) {
     const text = normalizeSummary(summary);
     const existing = doc.getElementById('nomybb-summary');
@@ -884,12 +1076,17 @@
       label.className = 'nomybb-summary-label';
       label.textContent = 'Summary';
       const paragraph = doc.createElement('p');
+      paragraph.className = 'nomybb-summary-text';
       box.append(label, paragraph);
       if (summaryPlacesBefore(host.tagName) && host.parentElement) host.parentElement.insertBefore(box, host);
       else host.insertBefore(box, host.firstChild);
     }
-    const paragraph = box.querySelector('p');
-    if (paragraph) paragraph.textContent = text;
+    const paragraph = box.querySelector('.nomybb-summary-text') || box.querySelector('p');
+    if (paragraph) {
+      paragraph.classList.add('nomybb-summary-text');
+      paragraph.textContent = text;
+    }
+    mountAskForm(box);
   }
 
   async function syncExtraContentScripts(rules) {
@@ -919,6 +1116,78 @@
     }]);
   }
 
+  const VERSION_FILE_URL = 'https://raw.githubusercontent.com/Bokkeman/NoMyBB/main/VERSION';
+
+  function parseVersionToken(value) {
+    const token = String(value || '').replace(/^\uFEFF/, '').trim().split(/\s+/)[0] || '';
+    return /^\d+\.\d+\.\d+$/.test(token) ? token : '';
+  }
+
+  function compareVersions(left, right) {
+    const a = parseVersionToken(left).split('.').map(Number);
+    const b = parseVersionToken(right).split('.').map(Number);
+    if (a.length !== 3 || b.length !== 3) return 0;
+    for (let i = 0; i < 3; i += 1) {
+      if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+    }
+    return 0;
+  }
+
+  function placeStatusBelowUpdate(doc) {
+    const update = doc.getElementById('nomybb-update');
+    const status = doc.getElementById('nomybb-status');
+    if (!status) return;
+    const top = update ? `${update.offsetHeight}px` : '0';
+    status.style.setProperty('top', top, 'important');
+  }
+
+  function showUpdateNotice(doc, notice, onDismiss) {
+    const existing = doc.getElementById('nomybb-update');
+    const latest = parseVersionToken(notice?.latest);
+    const current = parseVersionToken(notice?.current);
+    const update = Boolean(notice?.update) && latest && current && compareVersions(latest, current) > 0;
+    if (!update) {
+      existing?.remove();
+      placeStatusBelowUpdate(doc);
+      return;
+    }
+    let banner = existing;
+    if (!banner) {
+      banner = doc.createElement('div');
+      banner.id = 'nomybb-update';
+      banner.setAttribute('role', 'status');
+      const text = doc.createElement('p');
+      text.className = 'nomybb-update-text';
+      const link = doc.createElement('a');
+      link.href = 'https://github.com/Bokkeman/NoMyBB';
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = 'Open the repository';
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.className = 'nomybb-update-dismiss';
+      button.textContent = 'Dismiss';
+      button.addEventListener('click', () => {
+        const shown = banner.dataset.latest || '';
+        banner.remove();
+        placeStatusBelowUpdate(doc);
+        if (typeof onDismiss === 'function') onDismiss(shown);
+      });
+      banner.append(text, link, button);
+      (doc.documentElement || doc.body).appendChild(banner);
+    }
+    banner.dataset.latest = latest;
+    banner.style.setProperty('position', 'fixed', 'important');
+    banner.style.setProperty('top', '0', 'important');
+    banner.style.setProperty('left', '0', 'important');
+    banner.style.setProperty('right', '0', 'important');
+    banner.style.setProperty('z-index', '2147483647', 'important');
+    banner.style.setProperty('display', 'flex', 'important');
+    const paragraph = banner.querySelector('.nomybb-update-text');
+    if (paragraph) paragraph.textContent = `NoMyBB ${latest} is on GitHub. This copy is ${current}.`;
+    placeStatusBelowUpdate(doc);
+  }
+
   globalThis.NoMyBB = {
     BATCH_CHAR_LIMIT,
     BUILTIN_DOMAINS,
@@ -941,15 +1210,26 @@
     normalizeSummary,
     parseArticles,
     extractArticleText,
+    articleBodyText,
     queryHtml,
     formatProgress,
     progressPercent,
     summaryPlacesBefore,
     chunkArticles,
     buildChatRequest,
+    buildFollowUpRequest,
     parseModelResult,
+    parseFollowUpAnswer,
+    readFollowUpMessage,
     applyTitle,
     showSummary,
-    syncExtraContentScripts
+    appendFollowUp,
+    collectFollowUpHistory,
+    syncExtraContentScripts,
+    VERSION_FILE_URL,
+    parseVersionToken,
+    compareVersions,
+    placeStatusBelowUpdate,
+    showUpdateNotice
   };
 })();
