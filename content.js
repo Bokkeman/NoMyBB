@@ -15,10 +15,12 @@
     if (!anchor) return;
     const original = anchor.dataset?.nomybbOriginal;
     if (original) anchor.textContent = original;
+    if (original && anchor.getAttribute('title') === original) anchor.removeAttribute('title');
     delete anchor.dataset.nomybbOriginal;
     const sibling = anchor.nextElementSibling;
     if (sibling?.classList?.contains('nomybb-bulb')) sibling.remove();
     anchor.querySelector?.('.nomybb-bulb')?.remove();
+    anchor.ownerDocument?.getElementById('nomybb-tooltip')?.remove();
   }
 
   function pinBanner(banner) {

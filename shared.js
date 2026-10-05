@@ -822,8 +822,6 @@
     });
   }
 
-  const BULB_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 2a7 7 0 0 0-4 12.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A7 7 0 0 0 12 2zm2 14h-4v-1.05a5.02 5.02 0 1 1 4 .02V16zm-4 2h4v1.15a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V18z"/></svg>';
-
   function cardRoot(anchor) {
     const article = anchor.closest('article');
     const parent = article?.parentElement;
@@ -831,71 +829,16 @@
     return article || anchor;
   }
 
-  function ensureTooltip(doc) {
-    let tip = doc.getElementById('nomybb-tooltip');
-    if (tip) return tip;
-    tip = doc.createElement('div');
-    tip.id = 'nomybb-tooltip';
-    tip.setAttribute('role', 'tooltip');
-    doc.documentElement.appendChild(tip);
-    return tip;
-  }
-
-  function hideTooltip(doc) {
-    const tip = doc.getElementById('nomybb-tooltip');
-    if (!tip) return;
-    tip.classList.remove('nomybb-open');
-    tip.style.display = 'none';
-  }
-
-  function showTooltip(bulb) {
-    const doc = bulb.ownerDocument;
-    const tip = ensureTooltip(doc);
-    const original = bulb.dataset.original || bulb.title || '';
-    tip.textContent = original;
-    tip.style.display = 'block';
-    tip.classList.add('nomybb-open');
-    const rect = bulb.getBoundingClientRect();
-    const tipRect = tip.getBoundingClientRect();
-    const view = doc.defaultView || globalThis;
-    let left = rect.left + rect.width / 2 - tipRect.width / 2;
-    left = Math.max(8, Math.min(left, view.innerWidth - tipRect.width - 8));
-    let top = rect.top - tipRect.height - 8;
-    if (top < 8) top = rect.bottom + 8;
-    tip.style.left = `${Math.round(left)}px`;
-    tip.style.top = `${Math.round(top)}px`;
-  }
-
-  function ensureBulb(anchor, original) {
-    const doc = anchor.ownerDocument;
-    const insideHeading = /^H[1-6]$/i.test(anchor.tagName);
-    let bulb = anchor.nextElementSibling?.classList?.contains('nomybb-bulb')
-      ? anchor.nextElementSibling
-      : anchor.querySelector(':scope > .nomybb-bulb');
-    if (!bulb) {
-      bulb = doc.createElement('button');
-      bulb.type = 'button';
-      bulb.className = 'nomybb-bulb';
-      bulb.innerHTML = BULB_SVG;
-      bulb.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      bulb.addEventListener('mouseenter', () => showTooltip(bulb));
-      bulb.addEventListener('mouseleave', () => hideTooltip(doc));
-      bulb.addEventListener('focus', () => showTooltip(bulb));
-      bulb.addEventListener('blur', () => hideTooltip(doc));
-      if (insideHeading) anchor.appendChild(bulb);
-      else anchor.insertAdjacentElement('afterend', bulb);
-    }
-    bulb.dataset.original = original;
-    bulb.title = original;
-    bulb.setAttribute('aria-label', `Original title: ${original}`);
-    return bulb;
+  function removeBulb(anchor) {
+    const sibling = anchor.nextElementSibling;
+    if (sibling?.classList?.contains('nomybb-bulb')) sibling.remove();
+    anchor.querySelector?.('.nomybb-bulb')?.remove();
+    anchor.ownerDocument?.getElementById('nomybb-tooltip')?.remove();
   }
 
   function applyTitle(anchor, result) {
     const root = cardRoot(anchor);
+    removeBulb(anchor);
     if (result.ignore && !/^H[1-6]$/i.test(anchor.tagName)) {
       root.classList.add('nomybb-ignored');
       return;
@@ -910,7 +853,8 @@
     if (normalizeTitle(anchor.textContent) !== replacement) {
       anchor.textContent = replacement;
     }
-    ensureBulb(anchor, original);
+    if (original && original !== replacement) anchor.title = original;
+    else if (anchor.getAttribute('title') === original) anchor.removeAttribute('title');
   }
 
   function summaryPlacesBefore(tagName) {
@@ -978,7 +922,6 @@
   globalThis.NoMyBB = {
     BATCH_CHAR_LIMIT,
     BUILTIN_DOMAINS,
-    BULB_SVG,
     builtinSites,
     builtinSite,
     normalizeDomain,
@@ -1007,8 +950,6 @@
     parseModelResult,
     applyTitle,
     showSummary,
-    showTooltip,
-    hideTooltip,
     syncExtraContentScripts
   };
 })();
