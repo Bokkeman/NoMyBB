@@ -1,5 +1,9 @@
 (function () {
   const BATCH_CHAR_LIMIT = 14000;
+  const FOLLOW_UP_CACHE_LIMIT = 8;
+  const CACHE_ARTICLE_LIMIT_DEFAULT = 100;
+  const CACHE_ARTICLE_LIMIT_MIN = 1;
+  const CACHE_ARTICLE_LIMIT_MAX = 2000;
   const BUILTIN_DOMAINS = ['mybroadband.co.za', 'newsday.co.za', 'businesstech.co.za'];
 
   function builtinSites() {
@@ -191,6 +195,27 @@
 
   function normalizeTopics(text) {
     return String(text || '').replace(/\r\n/g, '\n').trim();
+  }
+
+  function normalizeCacheLimit(value) {
+    const text = String(value ?? '').trim();
+    if (!/^\d+$/.test(text)) return null;
+    const number = Number(text);
+    if (number < CACHE_ARTICLE_LIMIT_MIN || number > CACHE_ARTICLE_LIMIT_MAX) return null;
+    return number;
+  }
+
+  function cacheArticleLimit(value) {
+    return normalizeCacheLimit(value) ?? CACHE_ARTICLE_LIMIT_DEFAULT;
+  }
+
+  function pruneTitleMap(map, limit) {
+    const cap = cacheArticleLimit(limit);
+    const source = map && typeof map === 'object' ? map : {};
+    const entries = Object.entries(source);
+    if (entries.length <= cap) return source;
+    entries.sort((a, b) => (Number(b[1]?.processedAt) || 0) - (Number(a[1]?.processedAt) || 0));
+    return Object.fromEntries(entries.slice(0, cap));
   }
 
   function anchorTitle(anchor) {
@@ -906,6 +931,41 @@
     return clean;
   }
 
+  function normalizeFollowUp(item) {
+    const question = normalizeTitle(item?.question).slice(0, 500);
+    const answer = normalizeTitle(item?.answer).slice(0, 1400);
+    if (!question || !answer) return null;
+    return { question, answer, sources: followUpSources(item?.sources) };
+  }
+
+  function normalizeFollowUps(list) {
+    const clean = [];
+    for (const item of Array.isArray(list) ? list : []) {
+      const next = normalizeFollowUp(item);
+      if (next) clean.push(next);
+    }
+    return clean.slice(-FOLLOW_UP_CACHE_LIMIT);
+  }
+
+  function cacheFollowUp(entry, item, processedAt) {
+    if (!normalizeFollowUp(item)) return null;
+    const previous = entry && typeof entry === 'object' ? entry : {};
+    return {
+      ...previous,
+      followUps: normalizeFollowUps([...(previous.followUps || []), item]),
+      processedAt: processedAt || Date.now()
+    };
+  }
+
+  function carryFollowUps(saved, previous) {
+    // A new title or summary for this URL keeps the questions already stored on it.
+    const followUps = normalizeFollowUps(previous?.followUps);
+    const next = { ...saved };
+    delete next.followUps;
+    if (followUps.length) next.followUps = followUps;
+    return next;
+  }
+
   function readFollowUpMessage(payload) {
     const blocks = Array.isArray(payload?.content) ? payload.content : [];
     const texts = [];
@@ -1045,6 +1105,14 @@
     list.append(item);
   }
 
+  function restoreFollowUps(box, followUps) {
+    const list = box?.querySelector('.nomybb-followups');
+    if (!list || list.querySelector('.nomybb-followup')) return;
+    for (const item of normalizeFollowUps(followUps)) {
+      appendFollowUp(box, item.question, item.answer, item.sources);
+    }
+  }
+
   function collectFollowUpHistory(box) {
     if (!box?.querySelectorAll) return [];
     return [...box.querySelectorAll('.nomybb-followup')].slice(-4).map((item) => ({
@@ -1053,7 +1121,7 @@
     })).filter((item) => item.question && item.answer);
   }
 
-  function showSummary(doc, summary, selector) {
+  function showSummary(doc, summary, selector, followUps) {
     const text = normalizeSummary(summary);
     const existing = doc.getElementById('nomybb-summary');
     if (!text) {
@@ -1087,6 +1155,7 @@
       paragraph.textContent = text;
     }
     mountAskForm(box);
+    restoreFollowUps(box, followUps);
   }
 
   async function syncExtraContentScripts(rules) {
@@ -1206,8 +1275,14 @@
     homepageMarkup,
     buildAnalyseRequest,
     parseAnalyseResult,
+    CACHE_ARTICLE_LIMIT_DEFAULT,
+    CACHE_ARTICLE_LIMIT_MIN,
+    CACHE_ARTICLE_LIMIT_MAX,
     normalizeTitle,
     normalizeTopics,
+    normalizeCacheLimit,
+    cacheArticleLimit,
+    pruneTitleMap,
     normalizeSummary,
     parseArticles,
     extractArticleText,
@@ -1222,6 +1297,9 @@
     parseModelResult,
     parseFollowUpAnswer,
     readFollowUpMessage,
+    normalizeFollowUps,
+    cacheFollowUp,
+    carryFollowUps,
     applyTitle,
     showSummary,
     appendFollowUp,

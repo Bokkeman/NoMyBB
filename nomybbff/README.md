@@ -18,4 +18,6 @@ To keep it permanently, zip this folder with `manifest.json` at the root of the 
 
 Open settings from the toolbar button. The Deepseek API key stays in Firefox extension storage and is sent only to api.deepseek.com, along with the headline and article text being cleaned.
 
-On an article page, the summary is followed by a box where you can ask Deepseek a follow-up. The article text is the starting point. Deepseek then searches the web for what the question needs beyond that page. The question, the answer, and the pages it used appear above the box.
+On an article page, the summary is followed by a box where you can ask Deepseek a follow-up. The article text is the starting point. Deepseek then searches the web for what the question needs beyond that page. The question, the answer, and the pages it used appear above the box. That exchange is saved in the article cache and shown again the next time you open the page. Clear cache removes it with the titles and summaries. The eight most recent questions are kept.
+
+Settings includes Cached articles. That number is how many past articles stay in the cache. The default is 100, and it can be from 1 to 2000. Older articles are removed when a title is saved, when you save the setting, and about every six hours. Summaries and follow-up questions are removed with the article.

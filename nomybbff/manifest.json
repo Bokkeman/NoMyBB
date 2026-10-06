@@ -12,7 +12,7 @@
       }
     }
   },
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "alarms"],
   "host_permissions": [
     "https://mybroadband.co.za/*",
     "https://www.mybroadband.co.za/*",

@@ -3,7 +3,7 @@
   "name": "NoMyBB",
   "version": "1.0.11",
   "description": "Cleans headlines on MyBroadband, Newsday, and BusinessTech: drops clickbait, names the vague places and people, and hides topics you ignore.",
-  "permissions": ["storage", "scripting"],
+  "permissions": ["storage", "scripting", "alarms"],
   "host_permissions": [
     "https://mybroadband.co.za/*",
     "https://www.mybroadband.co.za/*",

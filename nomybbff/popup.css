@@ -122,6 +122,8 @@ textarea { resize: vertical; min-height: 110px; }
 
 .key-row input { flex: 1; }
 
+#cache-limit { max-width: 8rem; }
+
 .hint, .counts, .run {
   margin: 6px 0 0;
   color: #6d655b;

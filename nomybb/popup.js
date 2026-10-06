@@ -8,6 +8,7 @@ const run = document.querySelector('#run');
 const toggleKey = document.querySelector('#toggle-key');
 const siteSelect = document.querySelector('#site-select');
 const skipPartnerInput = document.querySelector('#skip-partner');
+const cacheLimitInput = document.querySelector('#cache-limit');
 const newDomainRow = document.querySelector('#new-domain-row');
 const newDomainInput = document.querySelector('#new-domain');
 const analyseButton = document.querySelector('#analyse-site');
@@ -155,12 +156,13 @@ function renderRun(runState) {
 }
 
 async function refreshCounts() {
-  const stored = await storage.get(['articleList', 'processedTitles', 'runState']);
+  const stored = await storage.get(['articleList', 'processedTitles', 'runState', 'cacheArticleLimit']);
   const listed = stored.articleList?.articles?.length || 0;
   const cleaned = Object.keys(stored.processedTitles || {}).length;
+  const limit = NoMyBB.cacheArticleLimit(stored.cacheArticleLimit);
   counts.textContent = listed || cleaned
-    ? `${listed} headline${listed === 1 ? '' : 's'} saved from listing pages. ${cleaned} cleaned title${cleaned === 1 ? '' : 's'} cached.`
-    : 'Nothing cached yet. Open a listing page after saving.';
+    ? `${listed} headline${listed === 1 ? '' : 's'} saved from listing pages. ${cleaned} of ${limit} cached article${limit === 1 ? '' : 's'} kept.`
+    : `Nothing cached yet. Open a listing page after saving. Up to ${limit} articles are kept.`;
   renderRun(stored.runState);
 }
 
@@ -199,10 +201,11 @@ function extraOrigins(rules) {
 }
 
 async function load() {
-  const stored = await storage.get(['apiKey', 'topicsToIgnore', 'siteRules', 'skipPartnerStories']);
+  const stored = await storage.get(['apiKey', 'topicsToIgnore', 'siteRules', 'skipPartnerStories', 'cacheArticleLimit']);
   apiKeyInput.value = stored.apiKey || '';
   topicsInput.value = stored.topicsToIgnore || '';
   skipPartnerInput.checked = Boolean(stored.skipPartnerStories);
+  cacheLimitInput.value = String(NoMyBB.cacheArticleLimit(stored.cacheArticleLimit));
   sites = NoMyBB.resolveSiteRules(stored.siteRules);
   selected = sites[0]?.domain || ADD;
   fillSelect();
@@ -327,6 +330,11 @@ removeButton.addEventListener('click', () => {
 
 document.querySelector('#settings').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const cacheArticleLimit = NoMyBB.normalizeCacheLimit(cacheLimitInput.value);
+  if (cacheArticleLimit === null) {
+    setStatus(`Enter a whole number from ${NoMyBB.CACHE_ARTICLE_LIMIT_MIN} to ${NoMyBB.CACHE_ARTICLE_LIMIT_MAX}.`, 'err');
+    return;
+  }
   const prepared = prepareSites();
   if (prepared.error) {
     setStatus(prepared.error, 'err');
@@ -345,6 +353,7 @@ document.querySelector('#settings').addEventListener('submit', async (event) => 
     apiKey: apiKeyInput.value.trim(),
     topicsToIgnore: topicsInput.value.replace(/\r\n/g, '\n').trim(),
     skipPartnerStories: skipPartnerInput.checked,
+    cacheArticleLimit,
     siteRules: prepared.rules
   });
   sites = prepared.rules;
@@ -372,7 +381,7 @@ toggleKey.addEventListener('click', () => {
 });
 
 document.querySelector('#clear-cache').addEventListener('click', async () => {
-  const confirmed = confirm('Clear cached titles and summaries? They will be requested again on the next visit.');
+  const confirmed = confirm('Clear cached titles, summaries, and follow-up questions? Titles and summaries will be requested again on the next visit.');
   if (!confirmed) return;
   await storage.remove('processedTitles');
   setStatus('Cached titles and summaries cleared. Reload a news page to clean them again.', 'ok');

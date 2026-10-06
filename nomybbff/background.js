@@ -3,14 +3,22 @@
 const api = globalThis.browser ?? globalThis.chrome;
 
 const LIST_LIMIT = 400;
-const TITLE_LIMIT = 500;
+const PRUNE_ALARM = 'nomybb-prune-cache';
+const PRUNE_INTERVAL_MINUTES = 360;
 
 let queue = Promise.resolve();
 let syncing = Promise.resolve();
+let titlesLock = Promise.resolve();
 
 function enqueue(task) {
   const run = queue.then(task, task);
   queue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function lockTitles(task) {
+  const run = titlesLock.then(task, task);
+  titlesLock = run.then(() => undefined, () => undefined);
   return run;
 }
 
@@ -77,28 +85,75 @@ async function saveArticleList(articles, pageUrl) {
   });
 }
 
-function pruneTitles(map) {
-  const entries = Object.entries(map);
-  if (entries.length <= TITLE_LIMIT) return map;
-  entries.sort((a, b) => (b[1].processedAt || 0) - (a[1].processedAt || 0));
-  return Object.fromEntries(entries.slice(0, TITLE_LIMIT));
+function pruneTitles(map, limit) {
+  return NoMyBB.pruneTitleMap(map, limit);
+}
+
+async function pruneStoredTitles() {
+  return lockTitles(async () => {
+    const stored = await api.storage.local.get(['processedTitles', 'cacheArticleLimit']);
+    const map = stored.processedTitles && typeof stored.processedTitles === 'object' ? stored.processedTitles : {};
+    const pruned = pruneTitles(map, stored.cacheArticleLimit);
+    if (pruned === map) return pruned;
+    await api.storage.local.set({ processedTitles: pruned });
+    return pruned;
+  });
+}
+
+async function schedulePrune() {
+  if (!api.alarms?.get || !api.alarms?.create) return;
+  const existing = await api.alarms.get(PRUNE_ALARM);
+  if (existing) return;
+  api.alarms.create(PRUNE_ALARM, { periodInMinutes: PRUNE_INTERVAL_MINUTES });
+}
+
+function startCachePrune() {
+  schedulePrune().catch(() => {});
+  pruneStoredTitles().catch(() => {});
+}
+
+function followUpKey(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+    return parsed.href;
+  } catch {
+    return '';
+  }
 }
 
 async function rememberTitles(entries, topicsSnapshot) {
-  const stored = await api.storage.local.get('processedTitles');
-  const map = stored.processedTitles || {};
-  const processedAt = Date.now();
-  for (const entry of entries) {
-    map[entry.url] = {
-      originalTitle: entry.originalTitle,
-      replacementTitle: entry.replacementTitle,
-      summary: entry.summary || '',
-      ignore: entry.ignore,
-      topicsSnapshot,
-      processedAt
-    };
-  }
-  await api.storage.local.set({ processedTitles: pruneTitles(map) });
+  return lockTitles(async () => {
+    const stored = await api.storage.local.get(['processedTitles', 'cacheArticleLimit']);
+    const map = stored.processedTitles || {};
+    const processedAt = Date.now();
+    for (const entry of entries) {
+      map[entry.url] = NoMyBB.carryFollowUps({
+        originalTitle: entry.originalTitle,
+        replacementTitle: entry.replacementTitle,
+        summary: entry.summary || '',
+        ignore: entry.ignore,
+        topicsSnapshot,
+        processedAt
+      }, map[entry.url]);
+    }
+    const pruned = pruneTitles(map, stored.cacheArticleLimit);
+    await api.storage.local.set({ processedTitles: pruned });
+    return pruned;
+  });
+}
+
+async function rememberFollowUp(url, item) {
+  const key = followUpKey(url);
+  if (!key) return;
+  await lockTitles(async () => {
+    const stored = await api.storage.local.get(['processedTitles', 'cacheArticleLimit']);
+    const map = stored.processedTitles || {};
+    const next = NoMyBB.cacheFollowUp(map[key], item, Date.now());
+    if (!next) return;
+    map[key] = next;
+    await api.storage.local.set({ processedTitles: pruneTitles(map, stored.cacheArticleLimit) });
+  });
 }
 
 async function fetchArticleText(url, bodySelector) {
@@ -212,6 +267,15 @@ async function answerFollowUp(message) {
       history: message?.history,
       question
     }));
+    try {
+      await rememberFollowUp(message?.url, {
+        question,
+        answer: researched.answer,
+        sources: researched.sources
+      });
+    } catch {
+      // The answer is still shown when the cache cannot accept another write.
+    }
     return { ok: true, answer: researched.answer, sources: researched.sources };
   } catch (error) {
     return { ok: false, error: error?.message || 'Deepseek request failed.' };
@@ -248,7 +312,7 @@ async function rewriteBatch(apiKey, topics, batch) {
 
 async function publish(port, topics, done) {
   if (!done.length) return;
-  await rememberTitles(done, topics);
+  const saved = await rememberTitles(done, topics);
   for (const item of done) {
     notify(port, {
       type: 'TITLE_READY',
@@ -256,7 +320,8 @@ async function publish(port, topics, done) {
       originalTitle: item.originalTitle,
       replacementTitle: item.replacementTitle,
       summary: item.summary || '',
-      ignore: item.ignore
+      ignore: item.ignore,
+      followUps: saved?.[item.url]?.followUps || []
     });
   }
 }
@@ -386,7 +451,8 @@ async function processPage(port, incoming, requireSummary, domain, pageUrl) {
         originalTitle: hit.originalTitle,
         replacementTitle: hit.replacementTitle,
         summary: hit.summary || '',
-        ignore: Boolean(hit.ignore)
+        ignore: Boolean(hit.ignore),
+        followUps: NoMyBB.normalizeFollowUps(hit.followUps)
       });
     }
     if (!titleCached || (requireSummary && !hit.summary)) pending.push(article);
@@ -535,11 +601,24 @@ api.runtime.onMessage.addListener((message) => {
 api.runtime.onInstalled.addListener(() => {
   syncSites().catch(() => {});
   readVersionNotice().catch(() => {});
+  startCachePrune();
 });
 
 api.runtime.onStartup.addListener(() => {
   syncSites().catch(() => {});
   readVersionNotice().catch(() => {});
+  startCachePrune();
+});
+
+api.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm?.name !== PRUNE_ALARM) return;
+  pruneStoredTitles().catch(() => {});
+});
+
+api.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes.cacheArticleLimit) return;
+  pruneStoredTitles().catch(() => {});
 });
 
 syncSites().catch(() => {});
+startCachePrune();

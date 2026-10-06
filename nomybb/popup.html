@@ -43,6 +43,10 @@
       </label>
       <p class="hint">Partner content and Industry News on those two sites keep the headline the site published, and they are not sent to Deepseek.</p>
 
+      <label for="cache-limit">Cached articles</label>
+      <input id="cache-limit" name="cacheArticleLimit" type="number" inputmode="numeric" min="1" max="2000" step="1" value="100">
+      <p class="hint">How many past articles stay in the cache. Older ones are removed, including their summaries and follow-up questions. The default is 100.</p>
+
       <section class="advanced">
         <h2>Advanced</h2>
         <p class="hint">NoMyBB rewrites the sites in this list. MyBroadband, Newsday, and BusinessTech start filled in. Choose a domain to edit its rules, or choose ...Add new.</p>

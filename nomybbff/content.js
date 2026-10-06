@@ -122,7 +122,7 @@
       const story = currentArticle();
       if (!story || story.url !== message.url) return;
       NoMyBB.applyTitle(story.heading, message);
-      NoMyBB.showSummary(document, message.summary, rule.summarySelector);
+      NoMyBB.showSummary(document, message.summary, rule.summarySelector, message.followUps);
       return;
     }
     const nodes = nodesByUrl.get(message.url) || [];

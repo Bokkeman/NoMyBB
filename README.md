@@ -7,7 +7,9 @@ Browser extensions that clean headlines on MyBroadband, Newsday, and BusinessTec
 
 Each browser keeps its own settings and cache. Open the toolbar button and save a Deepseek API key. The key stays in extension storage and is sent only to api.deepseek.com, along with the headline and article text being cleaned.
 
-On an article page, the summary is followed by a box where you can ask Deepseek a follow-up. The article text is the starting point. Deepseek then searches the web for what the question needs beyond that page. The question, the answer, and the pages it used appear above the box.
+On an article page, the summary is followed by a box where you can ask Deepseek a follow-up. The article text is the starting point. Deepseek then searches the web for what the question needs beyond that page. The question, the answer, and the pages it used appear above the box. That exchange is saved in the article cache and shown again the next time you open the page. Clear cache removes it with the titles and summaries. The eight most recent questions are kept.
+
+Settings includes Cached articles. That number is how many past articles stay in the cache. The default is 100, and it can be from 1 to 2000. Older articles are removed when a title is saved, when you save the setting, and about every six hours. Summaries and follow-up questions are removed with the article.
 
 After you change the extension files, reload the extension, then refresh any open news tab.
 
