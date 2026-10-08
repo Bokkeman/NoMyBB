@@ -50,19 +50,23 @@
       <section class="advanced">
         <h2>Advanced</h2>
         <p class="hint">NoMyBB rewrites the sites in this list. MyBroadband, Newsday, and BusinessTech start filled in. Choose a domain to edit its rules, or choose ...Add new.</p>
-        <p class="hint">A domain is stored as a hostname. Pasting https://www.example.com/news becomes example.com. Added sites run over https, and www is included.</p>
-        <p class="hint">Selectors can use tags, classes, ids, and attributes, joined by a space or &gt;. A comma uses the earliest match on the page.</p>
-
         <label for="site-select">Site</label>
         <select id="site-select"></select>
 
         <div id="new-domain-row" hidden>
           <label for="new-domain">Domain name</label>
           <input id="new-domain" type="text" autocomplete="off" spellcheck="false" placeholder="example.com">
-          <button type="button" id="analyse-site" hidden>Analyse</button>
+          <p class="hint">Hostname only. Pasting https://www.example.com/news becomes example.com. Added sites run over https, and www is included.</p>
+          <div id="setup-choice" class="actions" hidden>
+            <button type="button" id="setup-automatic">Automatic</button>
+            <button type="button" id="setup-manual">Manual</button>
+          </div>
+          <p id="setup-hint" class="hint" hidden>Automatic reads the home page and fills in the rules. Manual shows the fields for you to type.</p>
           <p id="analyse-status" class="hint"></p>
-          <p class="hint">Hostname only. https://, www, and any path are removed. Analyse reads the site home page and asks Deepseek to fill in the rules below.</p>
         </div>
+
+        <div id="rule-fields">
+        <p class="hint">Selectors can use tags, classes, ids, and attributes, joined by a space or &gt;. A comma uses the earliest match on the page.</p>
 
         <label for="index-path">Index path</label>
         <input id="index-path" type="text" autocomplete="off" spellcheck="false" placeholder="/news">
@@ -89,8 +93,10 @@
         <p class="hint">Selector for where the summary is inserted. A container receives it as its first content. A paragraph or heading receives it immediately before that element.</p>
 
         <div class="actions site-actions">
+          <button type="button" id="inspect-site" hidden>Inspect</button>
           <button type="button" id="reset-site" hidden>Reset built-in rules</button>
           <button type="button" id="remove-site">Remove this site</button>
+        </div>
         </div>
       </section>
 

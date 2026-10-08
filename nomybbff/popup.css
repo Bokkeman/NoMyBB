@@ -109,7 +109,7 @@ select { cursor: pointer; }
   margin-top: 3px;
 }
 
-#analyse-site { margin-top: 8px; }
+.setup-choice { margin-top: 8px; }
 
 .hint.ok { color: #1f6b3a; }
 .hint.err { color: #8d2b2b; }

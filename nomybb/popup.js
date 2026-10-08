@@ -11,8 +11,13 @@ const skipPartnerInput = document.querySelector('#skip-partner');
 const cacheLimitInput = document.querySelector('#cache-limit');
 const newDomainRow = document.querySelector('#new-domain-row');
 const newDomainInput = document.querySelector('#new-domain');
-const analyseButton = document.querySelector('#analyse-site');
+const setupChoice = document.querySelector('#setup-choice');
+const setupHint = document.querySelector('#setup-hint');
+const automaticButton = document.querySelector('#setup-automatic');
+const manualButton = document.querySelector('#setup-manual');
 const analyseStatus = document.querySelector('#analyse-status');
+const ruleFields = document.querySelector('#rule-fields');
+const inspectButton = document.querySelector('#inspect-site');
 const indexPathInput = document.querySelector('#index-path');
 const indexTitleInput = document.querySelector('#index-title');
 const patternInput = document.querySelector('#article-pattern');
@@ -48,6 +53,9 @@ const storage = globalThis.chrome?.storage?.local || {
 let sites = [];
 let addDraft = blankDraft();
 let selected = ADD;
+let addMode = 'domain';
+let setupDomain = '';
+let inspectGeneration = 0;
 
 function blankDraft() {
   return {
@@ -71,10 +79,25 @@ function setAnalyse(message, kind) {
   analyseStatus.className = kind ? `hint ${kind}` : 'hint';
 }
 
-function refreshAnalyseButton() {
-  const domain = selected === ADD ? NoMyBB.normalizeDomain(newDomainInput.value) : '';
-  analyseButton.hidden = !domain;
-  if (!domain) setAnalyse('');
+function enteredDomain() {
+  return NoMyBB.normalizeDomain(newDomainInput.value);
+}
+
+function refreshSetup() {
+  const adding = selected === ADD;
+  const domain = adding ? enteredDomain() : '';
+  if (adding && domain !== setupDomain) addMode = 'domain';
+  if (!domain) setupDomain = '';
+  newDomainRow.hidden = !adding;
+  const choosing = adding && addMode === 'domain' && Boolean(domain);
+  setupChoice.hidden = !choosing;
+  setupHint.hidden = !choosing;
+  ruleFields.hidden = adding && addMode !== 'fields';
+  const custom = !adding && !NoMyBB.builtinSite(selected);
+  inspectButton.hidden = !custom;
+  resetButton.hidden = adding || !NoMyBB.builtinSite(selected);
+  removeButton.hidden = adding;
+  if (!adding || !domain) setAnalyse('');
 }
 
 function readForm() {
@@ -109,10 +132,7 @@ function writeForm(site) {
   articleTitleInput.value = site?.articleTitleSelector || '';
   bodyInput.value = site?.bodySelector || '';
   summaryInput.value = site?.summarySelector || '';
-  resetButton.hidden = !NoMyBB.builtinSite(selected);
-  removeButton.hidden = adding;
-  if (!adding) setAnalyse('');
-  refreshAnalyseButton();
+  refreshSetup();
 }
 
 function fillSelect() {
@@ -171,6 +191,7 @@ function prepareSites() {
   const next = sites.map((site) => ({ ...site }));
   let focus = selected;
   if (selected === ADD && String(addDraft.domain || '').trim()) {
+    if (addMode !== 'fields') return { error: 'Choose Automatic or Manual for this domain before saving.' };
     const domain = NoMyBB.normalizeDomain(addDraft.domain);
     if (!domain) return { error: 'Enter a domain like example.com.' };
     const draft = { ...addDraft, domain };
@@ -214,93 +235,139 @@ async function load() {
 }
 
 siteSelect.addEventListener('change', () => {
+  inspectGeneration += 1;
+  setSetupBusy(false);
   rememberForm();
   selected = siteSelect.value;
   showSelected();
 });
 
+function setSetupBusy(busy, which) {
+  automaticButton.disabled = busy;
+  manualButton.disabled = busy;
+  inspectButton.disabled = busy;
+  automaticButton.textContent = busy && which === 'add' ? 'Inspecting…' : 'Automatic';
+  inspectButton.textContent = busy && which === 'saved' ? 'Inspecting…' : 'Inspect';
+}
+
+async function allowSite(domain) {
+  const origins = [`https://${domain}/*`, `https://www.${domain}/*`];
+  if (!globalThis.chrome?.permissions?.request) return true;
+  try {
+    return await chrome.permissions.request({ origins });
+  } catch {
+    return false;
+  }
+}
+
+async function inspectDomain(domain) {
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) throw new Error('Enter a Deepseek API key first.');
+  const granted = await allowSite(domain);
+  if (!granted) throw new Error(`Allow ${domain} so NoMyBB can read its home page.`);
+  const response = await fetch(`https://${domain}/`, {
+    redirect: 'follow',
+    credentials: 'omit',
+    headers: { Accept: 'text/html' },
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!response.ok) throw new Error(`Home page fetch failed (${response.status}).`);
+  const markup = NoMyBB.homepageMarkup(await response.text());
+  if (markup.length < 200) throw new Error('The home page had too little markup to inspect.');
+  const completion = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(NoMyBB.buildAnalyseRequest(domain, markup)),
+    signal: AbortSignal.timeout(60000)
+  });
+  const bodyText = await completion.text();
+  if (completion.status === 401 || completion.status === 403) {
+    throw new Error('Deepseek rejected the API key.');
+  }
+  if (!completion.ok) throw new Error(`Deepseek request failed (${completion.status}).`);
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    throw new Error('Deepseek returned an unreadable response.');
+  }
+  const content = payload?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Deepseek returned no rules.');
+  const result = NoMyBB.parseAnalyseResult(content, domain);
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+async function beginInspect(target) {
+  const domain = target === 'add' ? enteredDomain() : selected;
+  if (!domain || domain === ADD) return;
+  if (target === 'add') newDomainInput.value = domain;
+  const generation = ++inspectGeneration;
+  setSetupBusy(true, target);
+  const report = target === 'add' ? setAnalyse : setStatus;
+  report(`Reading ${domain} and asking Deepseek for rules.`);
+  try {
+    const result = await inspectDomain(domain);
+    if (generation !== inspectGeneration) return;
+    const note = result.note ? ` ${result.note}` : '';
+    if (target === 'add') {
+      setupDomain = domain;
+      addMode = 'fields';
+      addDraft = { ...result.rule, domain };
+      writeForm(addDraft);
+      setAnalyse(`Suggested rules for ${domain}.${note} Review them, then save.`, 'ok');
+    } else {
+      const index = sites.findIndex((site) => site.domain === domain);
+      if (index >= 0) sites[index] = { ...sites[index], ...result.rule, domain };
+      writeForm(sites[index] || { ...result.rule, domain });
+      setStatus(`Suggested rules for ${domain}.${note} Save to keep them.`, 'ok');
+    }
+  } catch (error) {
+    if (generation !== inspectGeneration) return;
+    report(error?.message || 'Could not inspect that site.', 'err');
+  } finally {
+    if (generation === inspectGeneration) setSetupBusy(false);
+  }
+}
+
 newDomainInput.addEventListener('input', () => {
-  refreshAnalyseButton();
+  refreshSetup();
 });
 
 newDomainInput.addEventListener('blur', () => {
-  const domain = NoMyBB.normalizeDomain(newDomainInput.value);
+  const domain = enteredDomain();
   if (domain) newDomainInput.value = domain;
-  refreshAnalyseButton();
+  refreshSetup();
 });
 
-analyseButton.addEventListener('click', async () => {
-  const domain = NoMyBB.normalizeDomain(newDomainInput.value);
+automaticButton.addEventListener('click', () => {
+  beginInspect('add');
+});
+
+manualButton.addEventListener('click', () => {
+  const domain = enteredDomain();
   if (!domain) return;
   newDomainInput.value = domain;
-  refreshAnalyseButton();
-  const apiKey = apiKeyInput.value.trim();
-  if (!apiKey) {
-    setAnalyse('Enter a Deepseek API key first.', 'err');
-    return;
-  }
-  const origins = [`https://${domain}/*`, `https://www.${domain}/*`];
-  if (globalThis.chrome?.permissions?.request) {
-    let granted = false;
-    try {
-      granted = await chrome.permissions.request({ origins });
-    } catch {
-      granted = false;
-    }
-    if (!granted) {
-      setAnalyse(`Allow ${domain} so NoMyBB can read its home page.`, 'err');
-      return;
-    }
-  }
-  analyseButton.disabled = true;
-  analyseButton.textContent = 'Analysing…';
-  analyseButton.hidden = false;
-  setAnalyse(`Reading ${domain} and asking Deepseek for rules.`);
-  try {
-    const response = await fetch(`https://${domain}/`, {
-      redirect: 'follow',
-      credentials: 'omit',
-      headers: { Accept: 'text/html' },
-      signal: AbortSignal.timeout(20000)
-    });
-    if (!response.ok) throw new Error(`Home page fetch failed (${response.status}).`);
-    const markup = NoMyBB.homepageMarkup(await response.text());
-    if (markup.length < 200) throw new Error('The home page had too little markup to analyse.');
-    const completion = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(NoMyBB.buildAnalyseRequest(domain, markup)),
-      signal: AbortSignal.timeout(60000)
-    });
-    const bodyText = await completion.text();
-    if (completion.status === 401 || completion.status === 403) {
-      throw new Error('Deepseek rejected the API key.');
-    }
-    if (!completion.ok) throw new Error(`Deepseek request failed (${completion.status}).`);
-    let payload;
-    try {
-      payload = JSON.parse(bodyText);
-    } catch {
-      throw new Error('Deepseek returned an unreadable response.');
-    }
-    const content = payload?.choices?.[0]?.message?.content;
-    if (!content) throw new Error('Deepseek returned no rules.');
-    const result = NoMyBB.parseAnalyseResult(content, domain);
-    if (result.error) throw new Error(result.error);
-    addDraft = { ...result.rule, domain };
-    writeForm(addDraft);
-    const note = result.note ? ` ${result.note}` : '';
-    setAnalyse(`Suggested rules for ${domain}.${note} Review them, then save.`, 'ok');
-  } catch (error) {
-    setAnalyse(error?.message || 'Could not analyse that site.', 'err');
-  } finally {
-    analyseButton.disabled = false;
-    analyseButton.textContent = 'Analyse';
-    refreshAnalyseButton();
-  }
+  setupDomain = domain;
+  addMode = 'fields';
+  addDraft = {
+    domain,
+    indexPath: '',
+    indexTitleSelector: '',
+    articlePathPattern: '',
+    articleTitleSelector: '',
+    bodySelector: '',
+    summarySelector: ''
+  };
+  writeForm(addDraft);
+  setAnalyse('');
+});
+
+inspectButton.addEventListener('click', () => {
+  beginInspect('saved');
 });
 
 indexPathInput.addEventListener('blur', () => {
