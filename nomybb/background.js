@@ -404,7 +404,7 @@ async function finishWith(port, message, phase, progress) {
   await setRunState(message, phase, snapshot);
 }
 
-async function processPage(port, incoming, requireSummary, domain, pageUrl) {
+async function processPage(port, incoming, requireSummary, summaryUrls, domain, pageUrl) {
   const rules = await readSiteRules();
   let rule = NoMyBB.ruleForHost(rules, domain);
   if (!rule && incoming[0]?.url) {
@@ -431,6 +431,16 @@ async function processPage(port, incoming, requireSummary, domain, pageUrl) {
   }
   if (!articles.length) return;
 
+  const summaryFor = new Set();
+  for (const raw of summaryUrls || []) {
+    try {
+      summaryFor.add(NoMyBB.canonicalArticleUrl(raw, rule));
+    } catch {
+      // Skip a summary target that is not a usable article URL.
+    }
+  }
+  const summarizeAll = Boolean(requireSummary) && summaryFor.size === 0;
+
   await saveArticleList(articles, pageUrl);
   const stored = await chrome.storage.local.get('processedTitles');
   const cache = stored.processedTitles || {};
@@ -453,7 +463,8 @@ async function processPage(port, incoming, requireSummary, domain, pageUrl) {
         followUps: NoMyBB.normalizeFollowUps(hit.followUps)
       });
     }
-    if (!titleCached || (requireSummary && !hit.summary)) pending.push(article);
+    const needsSummary = summarizeAll || summaryFor.has(article.url);
+    if (!titleCached || (needsSummary && !hit.summary)) pending.push(article);
   }
 
   if (!pending.length) {
@@ -566,10 +577,14 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((message) => {
     if (message?.type !== 'PROCESS_PAGE') return;
     const articles = Array.isArray(message.articles) ? message.articles.slice(0, 80) : [];
+    const summaryUrls = Array.isArray(message.summaryUrls)
+      ? message.summaryUrls.filter((url) => typeof url === 'string').slice(0, 80)
+      : [];
     enqueue(() => processPage(
       port,
       articles,
       Boolean(message.requireSummary),
+      summaryUrls,
       message.domain || '',
       message.pageUrl || ''
     )).catch((error) => {

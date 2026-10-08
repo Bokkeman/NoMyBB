@@ -120,10 +120,10 @@
   function applyReady(message) {
     if (pageKind() === 'article') {
       const story = currentArticle();
-      if (!story || story.url !== message.url) return;
-      NoMyBB.applyTitle(story.heading, message);
-      NoMyBB.showSummary(document, message.summary, rule.summarySelector, message.followUps);
-      return;
+      if (story && story.url === message.url) {
+        NoMyBB.applyTitle(story.heading, message);
+        NoMyBB.showSummary(document, message.summary, rule.summarySelector, message.followUps);
+      }
     }
     const nodes = nodesByUrl.get(message.url) || [];
     for (const anchor of nodes) {
@@ -178,42 +178,9 @@
     }
   }
 
-  function scan(force) {
-    const kind = pageKind();
-    if (!kind) return;
-    if (kind === 'article') {
-      if (skipPartner && NoMyBB.isPartnerStory(location.href, rule.domain)) {
-        const story = currentArticle();
-        if (story && !story.selectorError) restoreAnchor(story.heading);
-        document.getElementById('nomybb-summary')?.remove();
-        return;
-      }
-      const story = currentArticle();
-      if (story?.selectorError) {
-        showStatus(`NoMyBB: the article title selector for ${rule.domain} is not valid CSS.`);
-        return;
-      }
-      if (!story) {
-        showStatus(`NoMyBB: no element matched the article title selector on ${rule.domain}.`);
-        return;
-      }
-      if (!force && requested.has(story.url)) return;
-      requested.add(story.url);
-      post({
-        type: 'PROCESS_PAGE',
-        domain: rule.domain,
-        pageUrl: location.href,
-        requireSummary: true,
-        articles: [{ title: story.title, url: story.url }]
-      });
-      return;
-    }
-
+  function listingFromPage(excludeUrl) {
     const parsed = NoMyBB.parseArticles(document, rule);
-    if (parsed.selectorError) {
-      showStatus(`NoMyBB: the index title selector for ${rule.domain} is not valid CSS.`);
-      return;
-    }
+    if (parsed.selectorError) return parsed;
     if (skipPartner) {
       for (const [url, nodes] of [...parsed.nodesByUrl]) {
         if (!NoMyBB.isPartnerStory(url, rule.domain)) continue;
@@ -223,17 +190,75 @@
       }
       parsed.articles = parsed.articles.filter((article) => !NoMyBB.isPartnerStory(article.url, rule.domain));
     }
+    if (excludeUrl) parsed.articles = parsed.articles.filter((article) => article.url !== excludeUrl);
     nodesByUrl.clear();
     for (const [url, nodes] of parsed.nodesByUrl) nodesByUrl.set(url, nodes);
+    return parsed;
+  }
+
+  function freshArticles(parsed, force) {
     const fresh = force ? parsed.articles : parsed.articles.filter((article) => !requested.has(article.url));
     for (const article of parsed.articles) requested.add(article.url);
-    if (!fresh.length) return;
-    post({
+    return fresh;
+  }
+
+  function postArticles(articles, summaryUrls) {
+    if (!articles.length) return;
+    const payload = {
       type: 'PROCESS_PAGE',
       domain: rule.domain,
       pageUrl: location.href,
-      articles: fresh
-    });
+      articles
+    };
+    if (summaryUrls?.length) payload.summaryUrls = summaryUrls;
+    post(payload);
+  }
+
+  function scan(force) {
+    const kind = pageKind();
+    if (!kind) return;
+    if (kind === 'article') {
+      let storyArticle = null;
+      let excludeUrl = '';
+      if (skipPartner && NoMyBB.isPartnerStory(location.href, rule.domain)) {
+        const story = currentArticle();
+        if (story && !story.selectorError) restoreAnchor(story.heading);
+        document.getElementById('nomybb-summary')?.remove();
+      } else {
+        const story = currentArticle();
+        if (story?.selectorError) {
+          showStatus(`NoMyBB: the article title selector for ${rule.domain} is not valid CSS.`);
+          return;
+        }
+        if (!story) {
+          showStatus(`NoMyBB: no element matched the article title selector on ${rule.domain}.`);
+          return;
+        }
+        excludeUrl = story.url;
+        if (force || !requested.has(story.url)) {
+          storyArticle = { title: story.title, url: story.url };
+        }
+      }
+      const parsed = listingFromPage(excludeUrl);
+      if (parsed.selectorError) {
+        if (storyArticle) {
+          requested.add(storyArticle.url);
+          postArticles([storyArticle], [storyArticle.url]);
+        }
+        return;
+      }
+      const batch = storyArticle ? [storyArticle, ...freshArticles(parsed, force)] : freshArticles(parsed, force);
+      if (storyArticle) requested.add(storyArticle.url);
+      postArticles(batch, storyArticle ? [storyArticle.url] : []);
+      return;
+    }
+
+    const parsed = listingFromPage('');
+    if (parsed.selectorError) {
+      showStatus(`NoMyBB: the index title selector for ${rule.domain} is not valid CSS.`);
+      return;
+    }
+    postArticles(freshArticles(parsed, force), []);
   }
 
   function showAskError(form, message) {

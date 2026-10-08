@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NoMyBB",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Cleans headlines on MyBroadband, Newsday, and BusinessTech: drops clickbait, names the vague places and people, and hides topics you ignore.",
   "permissions": ["storage", "scripting", "alarms"],
   "host_permissions": [
