@@ -10,7 +10,10 @@
   let closing = false;
   let rule = null;
   let skipPartner = false;
+  let submitOtherOnPolls = false;
   let watching = false;
+  let pollTimer = 0;
+  let pollWatching = false;
 
   function restoreAnchor(anchor) {
     if (!anchor) return;
@@ -334,8 +337,51 @@
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  api.storage.local.get(['siteRules', 'skipPartnerStories', 'runState']).then((stored) => {
+  function myBroadbandPage() {
+    return location.hostname.replace(/^www\./i, '').toLowerCase() === 'mybroadband.co.za';
+  }
+
+  function voteOtherOnFreshPolls() {
+    if (!submitOtherOnPolls || !myBroadbandPage()) return;
+    try {
+      sessionStorage.removeItem('nomybb-voted-polls');
+    } catch {
+      // Ignore a page that blocks storage.
+    }
+    const votes = NoMyBB.freshPollOtherVotes(document);
+    let pending = false;
+    for (const item of votes) {
+      if (item.form.dataset.nomybbPollVote === '1') {
+        item.form.dataset.nomybbPollSubmitted = '1';
+        continue;
+      }
+      if (!item.input.id) continue;
+      item.form.dataset.nomybbVoteInput = item.input.id;
+      pending = true;
+    }
+    if (pending) document.dispatchEvent(new CustomEvent('nomybb-poll-other'));
+  }
+
+  function watchPolls() {
+    voteOtherOnFreshPolls();
+    if (pollWatching || !submitOtherOnPolls || !myBroadbandPage() || !document.documentElement) return;
+    pollWatching = true;
+    let tries = 0;
+    const retry = setInterval(() => {
+      tries += 1;
+      voteOtherOnFreshPolls();
+      if (tries >= 10) clearInterval(retry);
+    }, 400);
+    const observer = new MutationObserver(() => {
+      clearTimeout(pollTimer);
+      pollTimer = setTimeout(voteOtherOnFreshPolls, 250);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  api.storage.local.get(['siteRules', 'skipPartnerStories', 'submitOtherOnPolls', 'runState']).then((stored) => {
     skipPartner = Boolean(stored.skipPartnerStories);
+    submitOtherOnPolls = Boolean(stored.submitOtherOnPolls);
     rule = NoMyBB.ruleForHost(NoMyBB.resolveSiteRules(stored.siteRules), location.hostname);
     applyStoredRun(stored.runState);
     checkVersion();
@@ -348,12 +394,17 @@
         nodesByUrl.clear();
       }
       if (changes.skipPartnerStories) skipPartner = Boolean(changes.skipPartnerStories.newValue);
+      if (changes.submitOtherOnPolls) {
+        submitOtherOnPolls = Boolean(changes.submitOtherOnPolls.newValue);
+        watchPolls();
+      }
       if (!changes.topicsToIgnore && !changes.apiKey && !changes.siteRules && !changes.skipPartnerStories) return;
       if (!rule) return;
       requested.clear();
       watch();
       scan(true);
     });
+    watchPolls();
     if (!rule || !pageKind()) return;
     watch();
     scan(false);

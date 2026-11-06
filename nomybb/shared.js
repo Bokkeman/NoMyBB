@@ -1257,6 +1257,103 @@
     placeStatusBelowUpdate(doc);
   }
 
+  function collapsedText(value) {
+    return String(value || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function elementShown(element) {
+    const view = element.ownerDocument?.defaultView;
+    if (!view?.getComputedStyle) return true;
+    for (let node = element; node && node.nodeType === 1; node = node.parentElement) {
+      const style = view.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
+    return true;
+  }
+
+  function pollHeadingIn(root, form) {
+    const headings = root.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    for (const heading of headings) {
+      if (form.contains(heading) || collapsedText(heading.textContent) !== 'poll') continue;
+      if (heading.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING) return heading;
+    }
+    return null;
+  }
+
+  // The sidebar widget is the nearest ancestor that has the POLL heading and the vote form, and no article links.
+  function sidebarPollRoot(form) {
+    let node = form.parentElement;
+    for (let depth = 0; node && depth < 8; depth += 1) {
+      if (pollHeadingIn(node, form) && !node.querySelector('a[rel="bookmark"]')) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function choiceControl(form, label) {
+    const input = label.htmlFor
+      ? form.ownerDocument.getElementById(label.htmlFor)
+      : label.querySelector('input');
+    if (!input || !form.contains(input) || input.disabled) return null;
+    if (input.type !== 'radio' && input.type !== 'checkbox') return null;
+    return input;
+  }
+
+  function pollContainerId(form) {
+    const box = form.closest('[id^="polls-"]');
+    const match = box?.id && /^polls-(\d+)$/.exec(box.id);
+    return match ? match[1] : '';
+  }
+
+  function pollAnswerId(input) {
+    const match = /^poll-answer-(\d+)$/.exec(input?.id || '');
+    if (match) return match[1];
+    return /^\d+$/.test(input?.value || '') ? input.value : '';
+  }
+
+  function votedPollCookie(doc, pollId) {
+    if (!/^\d+$/.test(pollId || '')) return '';
+    const name = `voted_${pollId}`;
+    const parts = String(doc.cookie || '').split(';');
+    for (const part of parts) {
+      const item = part.trim();
+      const eq = item.indexOf('=');
+      if (eq <= 0 || item.slice(0, eq) !== name) continue;
+      try {
+        return decodeURIComponent(item.slice(eq + 1));
+      } catch {
+        return item.slice(eq + 1);
+      }
+    }
+    return '';
+  }
+
+  function freshPollOtherVotes(doc) {
+    const votes = [];
+    const seen = new Set();
+    const forms = doc.querySelectorAll('form.wp-polls-form');
+    for (const form of forms) {
+      if (seen.has(form) || form.dataset.nomybbPollSubmitted) continue;
+      if (!sidebarPollRoot(form) || !elementShown(form)) continue;
+      const pollId = pollContainerId(form);
+      if (!pollId || votedPollCookie(doc, pollId)) continue;
+      const vote = form.querySelector('input[name="vote"], button[name="vote"]');
+      if (!vote || vote.disabled || !elementShown(vote)) continue;
+      let other = null;
+      for (const label of form.querySelectorAll('label')) {
+        if (collapsedText(label.textContent) !== 'other') continue;
+        other = choiceControl(form, label);
+        if (other) break;
+      }
+      if (!other) continue;
+      const answerId = pollAnswerId(other);
+      if (!answerId) continue;
+      seen.add(form);
+      votes.push({ form, input: other, vote, pollId, answerId });
+    }
+    return votes;
+  }
+
   globalThis.NoMyBB = {
     BATCH_CHAR_LIMIT,
     BUILTIN_DOMAINS,
@@ -1308,6 +1405,10 @@
     parseVersionToken,
     compareVersions,
     placeStatusBelowUpdate,
-    showUpdateNotice
+    showUpdateNotice,
+    freshPollOtherVotes,
+    pollContainerId,
+    pollAnswerId,
+    votedPollCookie
   };
 })();

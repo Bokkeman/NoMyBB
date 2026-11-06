@@ -9,6 +9,7 @@ const run = document.querySelector('#run');
 const toggleKey = document.querySelector('#toggle-key');
 const siteSelect = document.querySelector('#site-select');
 const skipPartnerInput = document.querySelector('#skip-partner');
+const submitOtherInput = document.querySelector('#submit-other');
 const cacheLimitInput = document.querySelector('#cache-limit');
 const newDomainRow = document.querySelector('#new-domain-row');
 const newDomainInput = document.querySelector('#new-domain');
@@ -223,10 +224,11 @@ function extraOrigins(rules) {
 }
 
 async function load() {
-  const stored = await storage.get(['apiKey', 'topicsToIgnore', 'siteRules', 'skipPartnerStories', 'cacheArticleLimit']);
+  const stored = await storage.get(['apiKey', 'topicsToIgnore', 'siteRules', 'skipPartnerStories', 'submitOtherOnPolls', 'cacheArticleLimit']);
   apiKeyInput.value = stored.apiKey || '';
   topicsInput.value = stored.topicsToIgnore || '';
   skipPartnerInput.checked = Boolean(stored.skipPartnerStories);
+  submitOtherInput.checked = Boolean(stored.submitOtherOnPolls);
   cacheLimitInput.value = String(NoMyBB.cacheArticleLimit(stored.cacheArticleLimit));
   sites = NoMyBB.resolveSiteRules(stored.siteRules);
   selected = sites[0]?.domain || ADD;
@@ -421,6 +423,7 @@ document.querySelector('#settings').addEventListener('submit', async (event) => 
     apiKey: apiKeyInput.value.trim(),
     topicsToIgnore: topicsInput.value.replace(/\r\n/g, '\n').trim(),
     skipPartnerStories: skipPartnerInput.checked,
+    submitOtherOnPolls: submitOtherInput.checked,
     cacheArticleLimit,
     siteRules: prepared.rules
   });
